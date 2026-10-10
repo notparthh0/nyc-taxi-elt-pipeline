@@ -3,29 +3,33 @@ NYC Taxi Demand Prediction using XGBoost
 Paper: Urban Mobility Analytics Using Cloud-Native Big Data Pipelines
 Author: Parth Alagh, USICT GGSIPU
 
-Pipeline:
-  S3 (raw) → PySpark (clean) → Athena → dbt (transform) → XGBoost (predict)
+Features used at prediction time only:
+  - pickup_hour, pickup_day_of_week, pickup_month, pulocationid
+
+Features intentionally excluded (would not be known before trips occur):
+  - avg_fare, avg_trip_distance, avg_passengers, avg_duration_mins
+
+Validation: temporal split — earlier months train, later month tests.
+This simulates a real forecast scenario where the model is asked to
+predict future demand using only calendar and location inputs.
 """
 
-import boto3
 import pandas as pd
 from pyathena import connect
 from pyathena.pandas.cursor import PandasCursor
 from xgboost import XGBRegressor
-from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 import numpy as np
-import warnings
+import pickle, os, warnings
 warnings.filterwarnings("ignore")
 
 # ─────────────────────────────────────────────
-# 1. PULL DATA FROM ATHENA (dbt mart)
+# 1. PULL DATA FROM ATHENA
 # ─────────────────────────────────────────────
-
 print("=" * 60)
-print("NYC TAXI DEMAND PREDICTION — XGBoost Model")
+print("NYC TAXI DEMAND PREDICTION — XGBoost")
 print("=" * 60)
-print("\n[1/5] Pulling data from Athena dbt mart...")
+print("\n[1/5] Querying Athena dbt mart...")
 
 conn = connect(
     s3_staging_dir="s3://nyc-taxi-de-parth-2026/athena-results/",
@@ -33,117 +37,101 @@ conn = connect(
     cursor_class=PandasCursor
 )
 
-query = """
-SELECT
-    pickup_hour,
-    pickup_day_of_week,
-    pickup_month,
-    pulocationid,
-    trip_count,
-    avg_trip_distance,
-    avg_fare,
-    avg_passengers,
-    avg_duration_mins
-FROM nyc_taxi.trips_hourly_demand
-LIMIT 500000
-"""
+df = conn.cursor().execute("""
+    SELECT
+        pickup_date,
+        pickup_hour,
+        pickup_day_of_week,
+        pickup_month,
+        pulocationid,
+        trip_count
+    FROM nyc_taxi.trips_hourly_demand
+    ORDER BY pickup_date, pickup_hour
+""").as_pandas()
 
-df = conn.cursor().execute(query).as_pandas()
-print(f"   Rows fetched: {len(df):,}")
-print(f"   Columns: {list(df.columns)}")
+df["pickup_date"] = pd.to_datetime(df["pickup_date"])
+print(f"   Rows: {len(df):,} | Date range: {df['pickup_date'].min().date()} → {df['pickup_date'].max().date()}")
 
 # ─────────────────────────────────────────────
-# 2. FEATURE ENGINEERING
+# 2. TEMPORAL TRAIN / TEST SPLIT
 # ─────────────────────────────────────────────
+print("\n[2/5] Applying temporal split (no data leakage)...")
 
-print("\n[2/5] Engineering features...")
+# Use the last 20% of days as the holdout set — simulates forecasting future demand
+cutoff = df["pickup_date"].quantile(0.80)
+train_df = df[df["pickup_date"] <= cutoff]
+test_df  = df[df["pickup_date"] >  cutoff]
 
-df = df.dropna()
+print(f"   Train: {len(train_df):,} rows | up to {cutoff.date()}")
+print(f"   Test:  {len(test_df):,} rows  | after {cutoff.date()}")
 
-# Features: time + location + trip characteristics
+# ─────────────────────────────────────────────
+# 3. FEATURES — only what is known before trips happen
+# ─────────────────────────────────────────────
 FEATURES = [
-    "pickup_hour",
-    "pickup_day_of_week",
-    "pickup_month",
-    "pulocationid",
-    "avg_trip_distance",
-    "avg_fare",
-    "avg_passengers",
-    "avg_duration_mins"
+    "pickup_hour",        # hour of day (0-23)
+    "pickup_day_of_week", # day of week (1=Mon)
+    "pickup_month",       # month (1-12)
+    "pulocationid",       # pickup zone (NYC TLC zone ID)
 ]
-
 TARGET = "trip_count"
 
-X = df[FEATURES]
-y = df[TARGET]
+print(f"\n[3/5] Features used: {FEATURES}")
+print(f"   Note: fare, distance, passengers excluded — unavailable at forecast time.")
 
-print(f"   Feature matrix shape: {X.shape}")
-print(f"   Target range: {y.min()} – {y.max()} trips/hour/zone")
-
-# ─────────────────────────────────────────────
-# 3. TRAIN / TEST SPLIT
-# ─────────────────────────────────────────────
-
-print("\n[3/5] Splitting train/test (80/20)...")
-
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42
-)
-
-print(f"   Train size: {len(X_train):,} | Test size: {len(X_test):,}")
+X_train = train_df[FEATURES]
+y_train = train_df[TARGET]
+X_test  = test_df[FEATURES]
+y_test  = test_df[TARGET]
 
 # ─────────────────────────────────────────────
-# 4. TRAIN XGBoost MODEL
+# 4. BASELINE — mean predictor
 # ─────────────────────────────────────────────
+baseline_pred = np.full(len(y_test), y_train.mean())
+baseline_rmse = np.sqrt(mean_squared_error(y_test, baseline_pred))
+print(f"\n[4/5] Baseline (mean predictor) RMSE: {baseline_rmse:.2f}")
 
-print("\n[4/5] Training XGBoost Regressor...")
+# ─────────────────────────────────────────────
+# 5. TRAIN XGBOOST
+# ─────────────────────────────────────────────
+print("\n[5/5] Training XGBoost regressor...")
 
 model = XGBRegressor(
-    n_estimators=200,
+    n_estimators=300,
     max_depth=6,
-    learning_rate=0.1,
+    learning_rate=0.08,
     subsample=0.8,
     colsample_bytree=0.8,
     random_state=42,
     verbosity=0
 )
-
 model.fit(X_train, y_train)
-print("   Training complete.")
-
-# ─────────────────────────────────────────────
-# 5. EVALUATE
-# ─────────────────────────────────────────────
-
-print("\n[5/5] Evaluating model...")
 
 y_pred = model.predict(X_test)
-
-rmse  = np.sqrt(mean_squared_error(y_test, y_pred))
-mae   = mean_absolute_error(y_test, y_pred)
-r2    = r2_score(y_test, y_pred)
+rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+mae  = mean_absolute_error(y_test, y_pred)
+r2   = r2_score(y_test, y_pred)
 
 print("\n" + "=" * 60)
-print("MODEL PERFORMANCE")
+print("RESULTS (temporal holdout)")
 print("=" * 60)
-print(f"   RMSE (Root Mean Squared Error):  {rmse:.2f} trips")
-print(f"   MAE  (Mean Absolute Error):      {mae:.2f} trips")
-print(f"   R²   (Variance Explained):       {r2:.4f}")
+print(f"   RMSE:               {rmse:.2f}  trips  (baseline: {baseline_rmse:.2f})")
+print(f"   MAE:                {mae:.2f}  trips")
+print(f"   R²:                 {r2:.4f}")
+print(f"   Improvement over baseline RMSE: {((baseline_rmse - rmse) / baseline_rmse * 100):.1f}%")
 print("=" * 60)
 
 # Feature importance
-print("\nFEATURE IMPORTANCE (for research paper):")
-importance = dict(zip(FEATURES, model.feature_importances_))
-for feat, score in sorted(importance.items(), key=lambda x: -x[1]):
+print("\nFEATURE IMPORTANCE:")
+for feat, score in sorted(zip(FEATURES, model.feature_importances_), key=lambda x: -x[1]):
     bar = "█" * int(score * 40)
     print(f"   {feat:<25} {bar} {score:.4f}")
 
 # Save model
-import pickle, os
-model_dir = "/Users/parthalagh/MAIN/nyc-taxi-aws/transform/model"
+model_dir = os.path.join(os.path.dirname(__file__), "model")
 os.makedirs(model_dir, exist_ok=True)
-with open(f"{model_dir}/xgboost_demand_model.pkl", "wb") as f:
+model_path = os.path.join(model_dir, "xgboost_demand_model.pkl")
+with open(model_path, "wb") as f:
     pickle.dump(model, f)
 
-print(f"\nModel saved to: {model_dir}/xgboost_demand_model.pkl")
-print("\nDone. This output goes directly into the research paper results section.")
+print(f"\nModel saved: {model_path}")
