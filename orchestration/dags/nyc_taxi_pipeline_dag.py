@@ -97,19 +97,23 @@ def validate_pipeline():
     """
     import boto3
     import os
+    from pathlib import Path
 
-    s3 = boto3.client("s3", region_name="us-east-1")
-    bucket = "nyc-taxi-de-parth-2026"
+    bucket       = os.environ.get("S3_BUCKET", "nyc-taxi-de-parth-2026")
+    region       = os.environ.get("AWS_REGION", "us-east-1")
+    project_root = os.environ.get("PROJECT_ROOT", "")
+    model_path   = Path(project_root) / "transform" / "model" / "xgboost_demand_model.pkl"
+
+    s3 = boto3.client("s3", region_name=region)
 
     # Check cleaned data exists in S3
     response = s3.list_objects_v2(Bucket=bucket, Prefix="cleaned/")
-    assert response["KeyCount"] > 0, "No cleaned files found in S3!"
+    assert response["KeyCount"] > 0, f"No cleaned files found in s3://{bucket}/cleaned/"
 
     # Check XGBoost model file exists
-    model_path = "/Users/parthalagh/MAIN/nyc-taxi-aws/transform/model/xgboost_demand_model.pkl"
-    assert os.path.exists(model_path), "XGBoost model file not found!"
+    assert model_path.exists(), f"XGBoost model file not found at {model_path}"
 
-    print("✅ Pipeline validation passed.")
+    print("Pipeline validation passed.")
     return True
 
 validate = PythonOperator(
