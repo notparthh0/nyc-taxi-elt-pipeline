@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+venv/
+env/
+.env
+
+# AWS credentials — NEVER commit these
+keys/
+*.csv
+.aws/
+
+# Data files — too large for GitHub
+raw/
+data/
+*.parquet
+*.pkl
+
+# dbt
+nyc_taxi_transform/target/
+nyc_taxi_transform/logs/
+nyc_taxi_transform/.user.yml
+
+# Streamlit
+.streamlit/
+
+# macOS
+.DS_Store
+
+# Jupyter
+.ipynb_checkpoints/

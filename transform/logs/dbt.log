@@ -1,0 +1,32 @@
+[0m18:23:56.042399 [debug] [MainThread]: Sending event: {'category': 'dbt', 'action': 'invocation', 'label': 'start', 'context': [<snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x109f34670>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x10af9b550>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x10af9b370>]}
+
+
+============================== 18:23:56.044456 | c91d7ca5-7ef3-4e12-a96f-d53c91e6b6ea ==============================
+[0m18:23:56.044456 [info ] [MainThread]: Running with dbt=1.10.23
+[0m18:23:56.044751 [debug] [MainThread]: running dbt with arguments {'no_print': 'None', 'version_check': 'True', 'log_path': 'logs', 'printer_width': '80', 'fail_fast': 'False', 'target_path': 'None', 'profiles_dir': '/Users/parthalagh/.dbt', 'cache_selected_only': 'False', 'partial_parse': 'True', 'static_parser': 'True', 'invocation_command': 'dbt init nyc_taxi_transform', 'introspect': 'True', 'send_anonymous_usage_stats': 'True', 'log_format': 'default', 'log_cache_events': 'False', 'write_json': 'True', 'empty': 'None', 'quiet': 'False', 'indirect_selection': 'eager', 'warn_error': 'None', 'debug': 'False', 'use_colors': 'True', 'warn_error_options': 'WarnErrorOptionsV2(error=[], warn=[], silence=[])', 'use_experimental_parser': 'False'}
+[0m18:23:56.052683 [warn ] [MainThread]: [[33mWARNING[0m]: This version of dbt is deprecated and no longer receives regular patches, including for known bugs. Please upgrade to a newer supported version of dbt for new projects: https://docs.getdbt.com/docs/dbt-versions?utm_source=dbt-cli
+[0m18:23:56.052896 [debug] [MainThread]: Sending event: {'category': 'dbt', 'action': 'deprecated_version_invocation', 'label': 'c91d7ca5-7ef3-4e12-a96f-d53c91e6b6ea', 'context': [<snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x10af9b2e0>]}
+[0m18:23:56.053586 [debug] [MainThread]: Starter project path: /Users/parthalagh/Library/Python/3.9/lib/python/site-packages/dbt/include/starter_project
+[0m18:23:56.056400 [info ] [MainThread]: 
+Your new dbt project "nyc_taxi_transform" was created!
+
+For more information on how to configure the profiles.yml file,
+please consult the dbt documentation here:
+
+  https://docs.getdbt.com/docs/configure-your-profile
+
+One more thing:
+
+Need help? Don't hesitate to reach out to us via GitHub issues or on Slack:
+
+  https://community.getdbt.com/
+
+Happy modeling!
+
+[0m18:23:56.056544 [info ] [MainThread]: Setting up your profile.
+[0m18:26:50.497087 [info ] [MainThread]: Profile nyc_taxi_transform written to /Users/parthalagh/.dbt/profiles.yml using target's profile_template.yml and your supplied values. Run 'dbt debug' to validate the connection.
+[0m18:26:50.501666 [debug] [MainThread]: Resource report: {"command_name": "init", "command_success": true, "command_wall_clock_time": 174.50288, "process_in_blocks": "0", "process_kernel_time": 0.1352, "process_mem_max_rss": "117604352", "process_out_blocks": "0", "process_user_time": 0.787463}
+[0m18:26:50.502178 [debug] [MainThread]: Command `dbt init` succeeded at 18:26:50.502098 after 174.50 seconds
+[0m18:26:50.502530 [debug] [MainThread]: Sending event: {'category': 'dbt', 'action': 'invocation', 'label': 'end', 'context': [<snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x109f34670>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x10af9b2e0>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x10aee0eb0>]}
+[0m18:26:50.502872 [debug] [MainThread]: Flushing usage events
+[0m18:26:51.682462 [debug] [MainThread]: An error was encountered while trying to flush usage events
