@@ -7,9 +7,11 @@ venv/
 env/
 .env
 
+
 # AWS credentials — NEVER commit these
 keys/
 *.csv
+!dashboard/taxi_zone_lookup.csv
 .aws/
 
 # Data files — too large for GitHub

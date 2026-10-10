@@ -135,3 +135,25 @@ with open(model_path, "wb") as f:
     pickle.dump(model, f)
 
 print(f"\nModel saved: {model_path}")
+
+# Save evaluation metrics so the dashboard can load them
+import json
+from datetime import datetime
+
+metrics = {
+    "rmse": round(rmse, 2),
+    "mae": round(mae, 2),
+    "r2": round(r2, 4),
+    "baseline_rmse": round(baseline_rmse, 2),
+    "improvement_pct": round((baseline_rmse - rmse) / baseline_rmse * 100, 1),
+    "train_rows": len(X_train),
+    "test_rows": len(X_test),
+    "features": FEATURES,
+    "train_cutoff": str(cutoff.date()),
+    "evaluated_at": datetime.now().isoformat()
+}
+metrics_path = os.path.join(model_dir, "evaluation_metrics.json")
+with open(metrics_path, "w") as f:
+    json.dump(metrics, f, indent=2)
+print(f"Metrics saved: {metrics_path}")
+

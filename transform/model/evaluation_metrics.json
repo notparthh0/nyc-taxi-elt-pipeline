@@ -1,0 +1,17 @@
+{
+  "rmse": 21.63,
+  "mae": 12.42,
+  "r2": 0.9107,
+  "baseline_rmse": 72.42,
+  "improvement_pct": 70.1,
+  "train_rows": 53041,
+  "test_rows": 12507,
+  "features": [
+    "pickup_hour",
+    "pickup_day_of_week",
+    "pickup_month",
+    "pulocationid"
+  ],
+  "train_cutoff": "2023-01-25",
+  "evaluated_at": "2026-10-10T19:16:41.030147"
+}
