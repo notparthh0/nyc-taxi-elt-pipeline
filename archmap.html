@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>NYC Taxi ELT Pipeline — Runtime Architecture</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --bronze: #cd7f32;
+    --silver: #79c0ff;
+    --gold: #e3b341;
+    --ml: #56d364;
+    --orchestration: #d2a8ff;
+    --dashboard: #58a6ff;
+    --arrow: #484f58;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+    min-height: 100vh;
+    padding: 40px 24px;
+  }
+  header { text-align: center; margin-bottom: 48px; }
+  header h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.5px; margin-bottom: 8px; }
+  header p { color: var(--muted); font-size: 13px; font-family: monospace; }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 1fr 280px;
+    gap: 32px;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+  .pipeline { display: flex; flex-direction: column; align-items: center; gap: 0; }
+
+  /* LAYER LABELS */
+  .layer-label {
+    width: 100%;
+    max-width: 580px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 16px 0 8px;
+  }
+  .layer-pill {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 4px 12px;
+    border-radius: 20px;
+    border: 1px solid;
+    white-space: nowrap;
+  }
+  .layer-line { flex: 1; height: 1px; background: var(--border); }
+
+  /* NODE */
+  .node {
+    width: 100%;
+    max-width: 580px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 24px;
+    transition: border-color .2s;
+  }
+  .node:hover { border-color: #58a6ff55; }
+  .node-header { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+  .node-icon { width: 36px; height: 36px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
+  .node-title { font-size: 15px; font-weight: 600; }
+  .node-file { font-size: 11px; color: var(--muted); font-family: monospace; margin-top: 1px; }
+  .node-desc { font-size: 13px; color: var(--muted); line-height: 1.6; margin-bottom: 12px; }
+  .badges { display: flex; flex-wrap: wrap; gap: 6px; }
+  .badge { font-family: monospace; font-size: 11px; padding: 3px 8px; border-radius: 20px; border: 1px solid; white-space: nowrap; }
+
+  /* COLORS */
+  .c-ingest .node { border-left: 3px solid #f78166; }
+  .c-ingest .node-icon { background: #f7816622; }
+  .c-ingest .node-title { color: #f78166; }
+  .c-ingest .badge { color: #f78166; border-color: #f7816633; background: #f7816611; }
+
+  .c-bronze .node { border-left: 3px solid var(--bronze); }
+  .c-bronze .node-icon { background: #cd7f3222; }
+  .c-bronze .node-title { color: var(--bronze); }
+  .c-bronze .badge { color: var(--bronze); border-color: #cd7f3233; background: #cd7f3211; }
+
+  .c-silver .node { border-left: 3px solid var(--silver); }
+  .c-silver .node-icon { background: #79c0ff22; }
+  .c-silver .node-title { color: var(--silver); }
+  .c-silver .badge { color: var(--silver); border-color: #79c0ff33; background: #79c0ff11; }
+
+  .c-gold .node { border-left: 3px solid var(--gold); }
+  .c-gold .node-icon { background: #e3b34122; }
+  .c-gold .node-title { color: var(--gold); }
+  .c-gold .badge { color: var(--gold); border-color: #e3b34133; background: #e3b34111; }
+
+  .c-ml .node { border-left: 3px solid var(--ml); }
+  .c-ml .node-icon { background: #56d36422; }
+  .c-ml .node-title { color: var(--ml); }
+  .c-ml .badge { color: var(--ml); border-color: #56d36433; background: #56d36411; }
+
+  .c-dashboard .node { border-left: 3px solid var(--dashboard); }
+  .c-dashboard .node-icon { background: #58a6ff22; }
+  .c-dashboard .node-title { color: var(--dashboard); }
+  .c-dashboard .badge { color: var(--dashboard); border-color: #58a6ff33; background: #58a6ff11; }
+
+  /* ARROW */
+  .arrow { display: flex; flex-direction: column; align-items: center; width: 100%; max-width: 580px; padding: 4px 0; }
+  .arrow-line { width: 2px; height: 24px; background: var(--arrow); }
+  .arrow-label { font-size: 10px; color: var(--muted); font-family: monospace; background: var(--bg); padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border); white-space: nowrap; }
+  .arrow-head { width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 8px solid var(--arrow); }
+
+  /* SIDEBAR */
+  .sidebar { display: flex; flex-direction: column; gap: 20px; padding-top: 8px; }
+  .sidebar-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
+  .sidebar-card h3 { font-size: 13px; font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  .sidebar-card p { font-size: 12px; color: var(--muted); line-height: 1.6; margin-bottom: 10px; }
+  .metric { display: flex; justify-content: space-between; font-size: 12px; padding: 5px 0; border-bottom: 1px solid var(--border); }
+  .metric:last-child { border-bottom: none; }
+  .metric-val { font-family: monospace; color: var(--text); }
+  .metric-val.good { color: var(--ml); }
+
+  .s3-layer { display: flex; gap: 6px; margin-bottom: 8px; }
+  .s3-bucket { flex: 1; padding: 8px; border-radius: 6px; text-align: center; font-size: 11px; font-family: monospace; border: 1px solid; }
+
+  footer { text-align: center; margin-top: 48px; font-size: 11px; color: var(--muted); font-family: monospace; }
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin-bottom: 32px; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  .legend-dot { width: 10px; height: 10px; border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>NYC Taxi ELT Pipeline Architecture</h1>
+  <p>Medallion lakehouse — raw ingestion → Bronze (PySpark) → Silver (dbt/Athena) → Gold (XGBoost) → Streamlit</p>
+</header>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot" style="background:#f78166"></div> Ingestion</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--bronze)"></div> Bronze Layer</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--silver)"></div> Silver Layer</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--gold)"></div> Gold Layer</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--ml)"></div> ML / Inference</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--dashboard)"></div> Presentation</div>
+</div>
+
+<div class="layout">
+  <div class="pipeline">
+
+    <!-- INGESTION -->
+    <div class="layer-label">
+      <div class="layer-pill" style="color:#f78166;border-color:#f7816633;background:#f7816611">Ingestion</div>
+      <div class="layer-line"></div>
+    </div>
+
+    <div class="c-ingest" style="width:100%;max-width:580px">
+      <div class="node">
+        <div class="node-header">
+          <div class="node-icon">📥</div>
+          <div>
+            <div class="node-title">01 — Raw Data Source</div>
+            <div class="node-file">NYC TLC Yellow Taxi · Parquet</div>
+          </div>
+        </div>
+        <div class="node-desc">
+          NYC Taxi & Limousine Commission (TLC) Yellow Taxi trip records. 
+          Single-month Parquet dataset ingested as the raw source. 
+          3,066,766 trip records covering pickup/dropoff times, locations, 
+          fares, distances, and passenger counts.
+        </div>
+        <div class="badges">
+          <span class="badge">parquet</span>
+          <span class="badge">3,066,766 records</span>
+          <span class="badge">NYC TLC</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow">
+      <div class="arrow-line"></div>
+      <div class="arrow-label">load → PySpark DataFrame</div>
+      <div class="arrow-line"></div>
+      <div class="arrow-head"></div>
+    </div>
+
+    <!-- BRONZE -->
+    <div class="layer-label">
+      <div class="layer-pill" style="color:var(--bronze);border-color:#cd7f3233;background:#cd7f3211">Bronze Layer</div>
+      <div class="layer-line"></div>
+    </div>
+
+    <div class="c-bronze" style="width:100%;max-width:580px">
+      <div class="node">
+        <div class="node-header">
+          <div class="node-icon">🔨</div>
+          <div>
+            <div class="node-title">02 — PySpark Cleaning Engine</div>
+            <div class="node-file">pyspark_cleaning.py</div>
+          </div>
+        </div>
+        <div class="node-desc">
+          Distributed cleaning using PySpark: drops nulls and duplicates, 
+          filters invalid fare/distance/passenger values, casts column types, 
+          and extracts temporal features (hour, day_of_week, month). 
+          Outputs cleaned Parquet to S3 Bronze bucket.
+        </div>
+        <div class="badges">
+          <span class="badge">PySpark</span>
+          <span class="badge">null filtering</span>
+          <span class="badge">type casting</span>
+          <span class="badge">feature extraction</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow">
+      <div class="arrow-line"></div>
+      <div class="arrow-label">cleaned Parquet → s3://bucket/bronze/</div>
+      <div class="arrow-line"></div>
+      <div class="arrow-head"></div>
+    </div>
+
+    <div class="c-bronze" style="width:100%;max-width:580px">
+      <div class="node">
+        <div class="node-header">
+          <div class="node-icon">🪣</div>
+          <div>
+            <div class="node-title">03 — AWS S3 · Bronze Bucket</div>
+            <div class="node-file">s3://nyc-taxi-bucket/bronze/</div>
+          </div>
+        </div>
+        <div class="node-desc">
+          Raw cleaned data persisted in Parquet format on AWS S3. 
+          Serves as the durable source of truth for all downstream 
+          transformations. Registered as an external table in AWS Glue 
+          for Athena querying.
+        </div>
+        <div class="badges">
+          <span class="badge">AWS S3</span>
+          <span class="badge">Parquet</span>
+          <span class="badge">AWS Glue</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow">
+      <div class="arrow-line"></div>
+      <div class="arrow-label">Athena external table scan</div>
+      <div class="arrow-line"></div>
+      <div class="arrow-head"></div>
+    </div>
+
+    <!-- SILVER -->
+    <div class="layer-label">
+      <div class="layer-pill" style="color:var(--silver);border-color:#79c0ff33;background:#79c0ff11">Silver Layer</div>
+      <div class="layer-line"></div>
+    </div>
+
+    <div class="c-silver" style="width:100%;max-width:580px">
+      <div class="node">
+        <div class="node-header">
+          <div class="node-icon">🔍</div>
+          <div>
+            <div class="node-title">04 — AWS Athena · SQL Queries</div>
+            <div class="node-file">athena_queries.py · AWS Athena</div>
+          </div>
+        </div>
+        <div class="node-desc">
+          Serverless SQL engine queries the S3 Bronze Parquet files via 
+          AWS Glue catalog. Executes aggregation queries for zone-level 
+          demand metrics, temporal patterns, and fare distributions. 
+          Results feed into dbt staging models.
+        </div>
+        <div class="badges">
+          <span class="badge">AWS Athena</span>
+          <span class="badge">serverless SQL</span>
+          <span class="badge">AWS Glue catalog</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow">
+      <div class="arrow-line"></div>
+      <div class="arrow-label">ref() → staging models</div>
+      <div class="arrow-line"></div>
+      <div class="arrow-head"></div>
+    </div>
+
+    <div class="c-silver" style="width:100%;max-width:580px">
+      <div class="node">
+        <div class="node-header">
+          <div class="node-icon">🔧</div>
+          <div>
+            <div class="node-title">05 — dbt Staging Models</div>
+            <div class="node-file">models/staging/stg_trips_cleaned.sql</div>
+          </div>
+        </div>
+        <div class="node-desc">
+          dbt staging models standardise schema, rename columns, apply 
+          business logic filters, and cast types for Silver layer consistency. 
+          Includes dbt tests for not_null, unique, and accepted_values constraints. 
+          Materialised as Athena views.
+        </div>
+        <div class="badges">
+          <span class="badge">dbt</span>
+          <span class="badge">staging models</span>
+          <span class="badge">dbt tests</span>
+          <span class="badge">Athena views</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow">
+      <div class="arrow-line"></div>
+      <div class="arrow-label">ref(stg_trips_cleaned) → mart models</div>
+      <div class="arrow-line"></div>
+      <div class="arrow-head"></div>
+    </div>
+
+    <!-- GOLD -->
+    <div class="layer-label">
+      <div class="layer-pill" style="color:var(--gold);border-color:#e3b34133;background:#e3b34111">Gold Layer</div>
+      <div class="layer-line"></div>
+    </div>
+
+    <div class="c-gold" style="width:100%;max-width:580px">
+      <div class="node">
+        <div class="node-header">
+          <div class="node-icon">⭐</div>
+          <div>
+            <div class="node-title">06 — dbt Mart Models</div>
+            <div class="node-file">models/marts/fct_trips.sql · dim_zones.sql</div>
+          </div>
+        </div>
+        <div class="node-desc">
+          Gold-layer fact and dimension tables following Kimball dimensional 
+          modelling. fct_trips aggregates trip-level metrics; dim_zones holds 
+          zone lookup data. Materialised as Athena tables on S3 Gold bucket. 
+          Serves as the feature store for XGBoost training.
+        </div>
+        <div class="badges">
+          <span class="badge">dbt marts</span>
+          <span class="badge">Kimball</span>
+          <span class="badge">fct_trips</span>
+          <span class="badge">dim_zones</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow">
+      <div class="arrow-line"></div>
+      <div class="arrow-label">temporal holdout split → train/test</div>
+      <div class="arrow-line"></div>
+      <div class="arrow-head"></div>
+    </div>
+
+    <!-- ML -->
+    <div class="layer-label">
+      <div class="layer-pill" style="color:var(--ml);border-color:#56d36433;background:#56d36411">ML · Inference</div>
+      <div class="layer-line"></div>
+    </div>
+
+    <div class="c-ml" style="width:100%;max-width:580px">
+      <div class="node">
+        <div class="node-header">
+          <div class="node-icon">🤖</div>
+          <div>
+            <div class="node-title">07 — XGBoost Demand Forecasting</div>
+            <div class="node-file">train_model.py · model.pkl</div>
+          </div>
+        </div>
+        <div class="node-desc">
+          XGBoost regressor trained on Gold-layer features (hour, day_of_week, 
+          PULocationID, month) to forecast trip demand per zone per hour. 
+          Uses chronological train/test split (temporal holdout) to prevent 
+          data leakage. Excludes fare/distance/duration — derived post-prediction features.
+        </div>
+        <div class="badges">
+          <span class="badge">XGBoost</span>
+          <span class="badge">temporal holdout</span>
+          <span class="badge">R²=0.91</span>
+          <span class="badge">RMSE=21.63</span>
+          <span class="badge">+70.1% vs baseline</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow">
+      <div class="arrow-line"></div>
+      <div class="arrow-label">model.pkl → inference → predictions</div>
+      <div class="arrow-line"></div>
+      <div class="arrow-head"></div>
+    </div>
+
+    <!-- DASHBOARD -->
+    <div class="layer-label">
+      <div class="layer-pill" style="color:var(--dashboard);border-color:#58a6ff33;background:#58a6ff11">Presentation</div>
+      <div class="layer-line"></div>
+    </div>
+
+    <div class="c-dashboard" style="width:100%;max-width:580px">
+      <div class="node">
+        <div class="node-header">
+          <div class="node-icon">📊</div>
+          <div>
+            <div class="node-title">08 — Streamlit Dashboard</div>
+            <div class="node-file">app.py</div>
+          </div>
+        </div>
+        <div class="node-desc">
+          Interactive analytics dashboard visualising Gold-layer metrics and 
+          XGBoost demand forecasts. Charts include zone-level demand heatmaps, 
+          hourly trip distributions, fare analysis, and forecast vs actuals 
+          comparison plots.
+        </div>
+        <div class="badges">
+          <span class="badge">Streamlit</span>
+          <span class="badge">Plotly</span>
+          <span class="badge">Pandas</span>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /pipeline -->
+
+  <!-- SIDEBAR -->
+  <div class="sidebar">
+
+    <!-- S3 LAYERS -->
+    <div class="sidebar-card">
+      <h3>🪣 S3 Bucket Structure</h3>
+      <div class="s3-layer">
+        <div class="s3-bucket" style="color:var(--bronze);border-color:#cd7f3233;background:#cd7f3211">
+          /bronze/<br><span style="color:var(--muted)">raw cleaned</span>
+        </div>
+        <div class="s3-bucket" style="color:var(--silver);border-color:#79c0ff33;background:#79c0ff11">
+          /silver/<br><span style="color:var(--muted)">staged</span>
+        </div>
+        <div class="s3-bucket" style="color:var(--gold);border-color:#e3b34133;background:#e3b34111">
+          /gold/<br><span style="color:var(--muted)">marts</span>
+        </div>
+      </div>
+      <p style="font-size:11px">All layers persisted as Parquet on S3. Queried via Athena external tables registered in AWS Glue catalog.</p>
+    </div>
+
+    <!-- AIRFLOW -->
+    <div class="sidebar-card" style="border-left:3px solid var(--orchestration)">
+      <h3 style="color:var(--orchestration)">🌀 Airflow Orchestration</h3>
+      <p>DAG: nyc_taxi_pipeline_dag</p>
+      <div class="metric"><span>clean_data</span><span class="metric-val">PySpark</span></div>
+      <div class="metric"><span>upload_to_s3</span><span class="metric-val">boto3</span></div>
+      <div class="metric"><span>run_dbt</span><span class="metric-val">BashOperator</span></div>
+      <div class="metric"><span>retrain_xgboost</span><span class="metric-val">PythonOperator</span></div>
+    </div>
+
+    <!-- MODEL METRICS -->
+    <div class="sidebar-card" style="border-left:3px solid var(--ml)">
+      <h3 style="color:var(--ml)">📈 Model Metrics</h3>
+      <div class="metric"><span>R² Score</span><span class="metric-val good">0.91</span></div>
+      <div class="metric"><span>RMSE</span><span class="metric-val good">21.63</span></div>
+      <div class="metric"><span>vs Baseline</span><span class="metric-val good">+70.1%</span></div>
+      <div class="metric"><span>Records</span><span class="metric-val">3,066,766</span></div>
+      <div class="metric"><span>Validation</span><span class="metric-val">Temporal holdout</span></div>
+      <div class="metric"><span>Algorithm</span><span class="metric-val">XGBoost</span></div>
+    </div>
+
+    <!-- FULL STACK -->
+    <div class="sidebar-card">
+      <h3>🛠️ Full Stack</h3>
+      <div class="metric"><span>Processing</span><span class="metric-val">PySpark</span></div>
+      <div class="metric"><span>Storage</span><span class="metric-val">AWS S3</span></div>
+      <div class="metric"><span>Query</span><span class="metric-val">AWS Athena</span></div>
+      <div class="metric"><span>Transform</span><span class="metric-val">dbt</span></div>
+      <div class="metric"><span>Orchestration</span><span class="metric-val">Airflow</span></div>
+      <div class="metric"><span>ML</span><span class="metric-val">XGBoost</span></div>
+      <div class="metric"><span>Dashboard</span><span class="metric-val">Streamlit</span></div>
+    </div>
+
+    <!-- REPO -->
+    <div class="sidebar-card">
+      <h3>🔗 Repository</h3>
+      <p>github.com/notparthh0/nyc-taxi-elt-pipeline</p>
+      <div class="metric"><span>License</span><span class="metric-val">MIT</span></div>
+      <div class="metric"><span>Language</span><span class="metric-val">Python · SQL</span></div>
+    </div>
+
+  </div>
+</div>
+
+<footer>
+  Built from /Users/parthalagh/MAIN/nyc-taxi-aws — pyspark_cleaning · athena_queries · dbt models · airflow DAG · XGBoost · Streamlit
+</footer>
+
+</body>
+</html>
