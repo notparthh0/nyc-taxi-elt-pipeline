@@ -14,7 +14,9 @@ def load_dag(monkeypatch, target):
     monkeypatch.setenv("PIPELINE_TARGET", target)
     bag = DagBag(dag_folder=str(DAG_FILE), include_examples=False)
     assert bag.import_errors == {}
-    return bag.get_dag("nyc_taxi_pipeline_dag")
+    # read the parsed DAG directly: get_dag() would query Airflow's metadata DB,
+    # which doesn't exist on a fresh CI machine
+    return bag.dags["nyc_taxi_pipeline_dag"]
 
 
 def chain(dag):
