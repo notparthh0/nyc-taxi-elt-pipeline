@@ -1,0 +1,51 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  pipeline-tests:
+    name: PySpark + dbt (DuckDB) tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4          # PySpark needs a JVM
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install
+        run: pip install -r requirements-dev.txt
+
+      - name: dbt parse (models, macros and tests compile)
+        working-directory: transform/nyc_taxi_transform
+        run: dbt parse --profiles-dir profiles --target local
+
+      - name: Unit and end-to-end tests
+        run: pytest
+
+  dag-tests:
+    name: Airflow DAG parses and is wired correctly
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Airflow (with the official constraints file)
+        run: |
+          pip install "apache-airflow==3.0.6" pytest \
+            --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-3.0.6/constraints-3.11.txt"
+
+      - name: DAG tests
+        run: pytest tests/test_dag.py

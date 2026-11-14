@@ -1,0 +1,29 @@
+version: 2
+
+models:
+  - name: trips_hourly_demand
+    description: "Trips per pickup zone per hour, one row per (date, hour, zone) that had at least one trip."
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [pickup_date, pickup_hour, pulocationid]
+    columns:
+      - name: trip_count
+        data_tests:
+          - not_null
+          - in_range:
+              arguments:
+                min_value: 1
+      - name: pickup_hour
+        data_tests:
+          - in_range:
+              arguments:
+                min_value: 0
+                max_value: 23
+      - name: avg_fare
+        data_tests:
+          - in_range:
+              arguments:
+                min_value: 0
+      - name: month_key
+        data_tests: [not_null]

@@ -1,0 +1,43 @@
+version: 2
+
+models:
+  - name: stg_trips_cleaned
+    description: "One row per cleaned trip with calendar features."
+    columns:
+      - name: tpep_pickup_datetime
+        data_tests: [not_null]
+      - name: pulocationid
+        description: "TLC pickup zone (1-265; 264 and 265 are 'Unknown')."
+        data_tests:
+          - not_null
+          - in_range:
+              arguments:
+                min_value: 1
+                max_value: 265
+      - name: pickup_hour
+        data_tests:
+          - in_range:
+              arguments:
+                min_value: 0
+                max_value: 23
+      - name: pickup_day_of_week
+        description: "ISO day of week, 1 = Monday ... 7 = Sunday."
+        data_tests:
+          - in_range:
+              arguments:
+                min_value: 1
+                max_value: 7
+      - name: trip_duration_mins
+        description: "Whole minutes; the cleaning job drops trips over 180 minutes."
+        data_tests:
+          - in_range:
+              arguments:
+                min_value: 0
+                max_value: 180
+      - name: passenger_count
+        data_tests:
+          - in_range:
+              arguments:
+                min_value: 1
+      - name: month_key
+        data_tests: [not_null]
