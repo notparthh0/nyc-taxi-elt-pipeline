@@ -47,3 +47,6 @@ spark-warehouse/
 metastore_db/
 derby.log
 .airflow/
+
+# dbt writes an anonymous id here
+.user.yml
