@@ -33,3 +33,17 @@ nyc_taxi_transform/.user.yml
 
 # Jupyter
 .ipynb_checkpoints/
+
+# dbt (project lives in transform/nyc_taxi_transform)
+transform/logs/
+transform/nyc_taxi_transform/target/
+transform/nyc_taxi_transform/logs/
+
+# Local lake / warehouse / tests
+*.duckdb
+*.duckdb.wal
+.pytest_cache/
+spark-warehouse/
+metastore_db/
+derby.log
+.airflow/

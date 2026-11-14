@@ -1,13 +1,25 @@
+# Pipeline
 pyspark==3.5.1
-boto3>=1.28
-pyathena[pandas]>=3.0
-dbt-core>=1.8
-dbt-athena-community>=1.8
-xgboost>=2.0
-scikit-learn>=1.3
 pandas>=2.0
 numpy>=1.24
+pyarrow>=14.0
+
+# Transformations (dbt): DuckDB for local runs and tests, Athena for AWS
+dbt-core>=1.10,<1.11
+dbt-duckdb>=1.10,<1.11
+dbt-athena-community>=1.9
+duckdb>=1.1
+
+# AWS
+boto3>=1.28
+pyathena[pandas]>=3.0
+
+# Model + dashboard
+xgboost>=2.0
+scikit-learn>=1.3
 streamlit>=1.35
 plotly>=5.20
-pyarrow>=14.0
-apache-airflow>=2.8
+
+# Airflow is installed separately with its constraints file (see README):
+#   pip install "apache-airflow==3.0.6" --constraint \
+#     "https://raw.githubusercontent.com/apache/airflow/constraints-3.0.6/constraints-3.11.txt"
