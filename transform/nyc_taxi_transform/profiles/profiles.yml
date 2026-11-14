@@ -1,0 +1,25 @@
+# Two targets for the same models:
+#   local  - DuckDB reading the local Parquet lake (no AWS needed; used by tests and CI)
+#   athena - AWS Athena over the S3 lake
+#
+#   dbt build --profiles-dir profiles --target local
+#   dbt build --profiles-dir profiles --target athena     # needs S3_STAGING and S3_DATA_DIR
+#
+# This lives in profiles/ (not the project root) on purpose, so plain `dbt run`
+# keeps using ~/.dbt/profiles.yml exactly as before.
+nyc_taxi_transform:
+  target: "{{ env_var('DBT_TARGET', 'local') }}"
+  outputs:
+    local:
+      type: duckdb
+      path: "{{ env_var('DUCKDB_PATH', '../../data/lake/warehouse.duckdb') }}"
+      schema: nyc_taxi
+      threads: 4
+    athena:
+      type: athena
+      region_name: "{{ env_var('AWS_REGION', 'us-east-1') }}"
+      s3_staging_dir: "{{ env_var('S3_STAGING', 's3://set-S3_STAGING/athena-results/') }}"
+      s3_data_dir: "{{ env_var('S3_DATA_DIR', 's3://set-S3_DATA_DIR/dbt/') }}"
+      database: awsdatacatalog
+      schema: nyc_taxi
+      threads: 4

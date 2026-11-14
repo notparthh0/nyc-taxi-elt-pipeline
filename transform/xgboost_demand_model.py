@@ -15,8 +15,6 @@ predict future demand using only calendar and location inputs.
 """
 
 import pandas as pd
-from pyathena import connect
-from pyathena.pandas.cursor import PandasCursor
 from xgboost import XGBRegressor
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 import numpy as np
@@ -29,15 +27,10 @@ warnings.filterwarnings("ignore")
 print("=" * 60)
 print("NYC TAXI DEMAND PREDICTION — XGBoost")
 print("=" * 60)
-print("\n[1/5] Querying Athena dbt mart...")
-
-conn = connect(
-    s3_staging_dir="s3://nyc-taxi-de-parth-2026/athena-results/",
-    region_name="us-east-1",
-    cursor_class=PandasCursor
-)
-
-df = conn.cursor().execute("""
+# DATA_SOURCE=athena (default) reads the mart from AWS Athena;
+# DATA_SOURCE=duckdb reads the same mart built locally by `dbt build --target local`.
+DATA_SOURCE = os.environ.get("DATA_SOURCE", "athena").lower()
+MART_SQL = """
     SELECT
         pickup_date,
         pickup_hour,
@@ -46,9 +39,30 @@ df = conn.cursor().execute("""
         pulocationid,
         trip_count
     FROM nyc_taxi.trips_hourly_demand
-    ORDER BY pickup_date, pickup_hour
-""").as_pandas()
+    ORDER BY pickup_date, pickup_hour, pulocationid
+"""
 
+if DATA_SOURCE == "duckdb":
+    import duckdb
+    duckdb_path = os.environ.get(
+        "DUCKDB_PATH",
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "lake", "warehouse.duckdb"),
+    )
+    print(f"\n[1/5] Reading dbt mart from DuckDB ({duckdb_path})...")
+    with duckdb.connect(duckdb_path, read_only=True) as con:
+        df = con.execute(MART_SQL).df()
+else:
+    from pyathena import connect
+    from pyathena.pandas.cursor import PandasCursor
+    print("\n[1/5] Querying Athena dbt mart...")
+    conn = connect(
+        s3_staging_dir=os.environ.get("S3_STAGING", "s3://nyc-taxi-de-parth-2026/athena-results/"),
+        region_name=os.environ.get("AWS_REGION", "us-east-1"),
+        cursor_class=PandasCursor,
+    )
+    df = conn.cursor().execute(MART_SQL).as_pandas()
+
+df.columns = [c.lower() for c in df.columns]
 df["pickup_date"] = pd.to_datetime(df["pickup_date"])
 print(f"   Rows: {len(df):,} | Date range: {df['pickup_date'].min().date()} → {df['pickup_date'].max().date()}")
 
@@ -128,7 +142,9 @@ for feat, score in sorted(zip(FEATURES, model.feature_importances_), key=lambda 
     print(f"   {feat:<25} {bar} {score:.4f}")
 
 # Save model
-model_dir = os.path.join(os.path.dirname(__file__), "model")
+# MODEL_DIR lets local/Airflow runs write somewhere else, so they never overwrite
+# the original model in transform/model/ that the research results were checked against.
+model_dir = os.environ.get("MODEL_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "model"))
 os.makedirs(model_dir, exist_ok=True)
 model_path = os.path.join(model_dir, "xgboost_demand_model.pkl")
 with open(model_path, "wb") as f:
@@ -141,6 +157,7 @@ import json
 from datetime import datetime
 
 metrics = {
+    "data_source": DATA_SOURCE,
     "rmse": round(rmse, 2),
     "mae": round(mae, 2),
     "r2": round(r2, 4),

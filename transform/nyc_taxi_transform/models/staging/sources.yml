@@ -1,0 +1,28 @@
+version: 2
+
+sources:
+  - name: nyc_taxi
+    description: "Cleaned trips written by ingestion/spark/clean_trips.py, partitioned by year/month."
+    schema: nyc_taxi
+    tables:
+      - name: trips_cleaned
+        description: >
+          One row per trip that passed the 7 cleaning rules. On Athena this is the
+          table registered by ingestion/athena_register.py; locally DuckDB reads the
+          same Parquet files straight from data/lake/trips_cleaned/.
+        identifier: "{{ var('trips_table') }}"
+        meta:
+          # used by dbt-duckdb only (ignored on Athena)
+          external_location: "read_parquet('{{ env_var('LAKE_DIR', '../../data/lake/trips_cleaned') }}/*/*/*.parquet', hive_partitioning = true)"
+        columns:
+          - name: tpep_pickup_datetime
+            data_tests: [not_null]
+          - name: tpep_dropoff_datetime
+            data_tests: [not_null]
+          - name: pulocationid
+            data_tests: [not_null]
+          - name: fare_amount
+            data_tests:
+              - in_range:
+                  arguments:
+                    min_value: 0.01
