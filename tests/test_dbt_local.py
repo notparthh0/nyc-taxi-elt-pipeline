@@ -1,5 +1,6 @@
 """
-End to end without AWS: synthetic raw months -> PySpark cleaning -> dbt build on DuckDB.
+End to end without AWS: synthetic raw months -> PySpark cleaning into Iceberg -> dbt build
+on DuckDB reading that Iceberg table.
 Proves the dbt models and all their tests pass, and that re-running a month
 incrementally does not duplicate rows.
 """
@@ -23,8 +24,7 @@ pytestmark = pytest.mark.skipif(DBT is None, reason="dbt is not installed")
 
 
 def dbt_build(tmp_path, *extra):
-    env = {**os.environ,
-           "LAKE_DIR": str(tmp_path / "lake"),
+    env = {**os.environ,  # ICEBERG_WAREHOUSE is the per-session test warehouse (conftest.py)
            "DUCKDB_PATH": str(tmp_path / "warehouse.duckdb"),
            "DBT_TARGET": "local"}
     command = [DBT, "build", "--profiles-dir", "profiles", "--target", "local",

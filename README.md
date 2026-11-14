@@ -2,9 +2,9 @@
 
 ![ci](https://github.com/notparthh0/nyc-taxi-elt-pipeline/actions/workflows/ci.yml/badge.svg)
 
-A monthly batch pipeline for NYC TLC Yellow Taxi data. PySpark cleans each month into a partitioned Parquet lake, dbt builds and tests an hourly-demand mart, XGBoost forecasts demand per zone, and Airflow runs it end to end.
+A monthly batch pipeline for NYC TLC Yellow Taxi data. PySpark cleans each month into an **Apache Iceberg** table, dbt builds and tests an hourly-demand mart on top of it, XGBoost forecasts demand per zone, and Airflow runs it end to end.
 
-This is the batch half of my NYC Taxi Data Platform. The real-time half, [nyc-taxi-streaming](https://github.com/notparthh0/nyc-taxi-streaming), replays this pipeline's cleaned lake through Kafka into Spark Structured Streaming to detect demand spikes.
+This is the batch half of my NYC Taxi Lakehouse Platform. The real-time half, [nyc-taxi-streaming](https://github.com/notparthh0/nyc-taxi-streaming), streams the same trips through Kafka into Spark Structured Streaming. It writes into the same Iceberg lakehouse, and it detects demand spikes against seasonal baselines read from this pipeline's Iceberg table.
 
 It runs two ways:
 
@@ -19,9 +19,11 @@ It runs two ways:
 flowchart LR
     TLC["NYC TLC<br/>monthly Parquet"] --> DL["download_tlc.py<br/>idempotent download"]
     DL --> SP["PySpark clean<br/>7 rules + quality gate"]
-    SP --> LAKE["Parquet lake<br/>year=/month= partitions"]
-    LAKE -->|local| DUCK["DuckDB"]
+    SP --> ICE["Iceberg: lake.nyc.trips_cleaned<br/>months() partitions, overwritePartitions"]
+    SP --> LAKE["Parquet export<br/>year=/month="]
+    ICE -->|local| DUCK["DuckDB<br/>iceberg_scan"]
     LAKE -->|aws| S3["S3"] --> ATH["Athena table<br/>partitioned"]
+    ICE -.->|seasonal baselines| STREAM["nyc-taxi-streaming<br/>(writes lake.nyc.zone_windows_live)"]
     DUCK --> DBT["dbt: staging view +<br/>incremental mart + 19 tests"]
     ATH --> DBT
     DBT --> ML["XGBoost<br/>demand forecast"]
@@ -35,6 +37,20 @@ One Airflow run processes one month: `resolve_month → download_raw → spark_c
 ---
 
 ## Results (measured on a MacBook Air, Nov 2026)
+
+### 12-month backfill through Airflow
+
+All 12 months of 2023, run as 12 separate runs of the Airflow DAG (`airflow dags test`, one month each: download → clean into Iceberg → dbt build + tests → retrain → validate), **finished in 6 min 4 s**, about 30 s per month.
+
+| | |
+|---|---:|
+| Raw trips → clean | 38,310,226 → **35,574,647** |
+| Rows in Iceberg `lake.nyc.trips_cleaned` | 35,574,647 (12 month partitions) |
+| `trips_hourly_demand` mart | 791,170 zone-hours, summing to the same 35,574,647 trips |
+| dbt tests | 21/21 passed in every one of the 12 runs |
+| Trips filed in the wrong month (rule 7) | **582 across the year** (28–104 per month) |
+
+The quality gate and all 19 data tests passed on every month: nothing in 2023 broke them. The real data problem the pipeline caught was the 582 trips with a pickup time outside the month whose file they came in. Rule 7 drops them, which also keeps every Iceberg write inside exactly one month partition.
 
 ### Cleaning
 
@@ -60,7 +76,7 @@ Each run writes a quality report (`data/lake/trips_cleaned/_reports/quality_<mon
   - a **reconciliation test**: every cleaned trip is counted exactly once in the mart;
   - a uniqueness test on (date, hour, zone);
   - range checks on hours, weekdays, zone IDs, durations and fares.
-- **Incremental by month.** A second month was backfilled with `--vars '{"month": "2023-02"}'` while January stayed untouched. Re-running a month twice gives identical totals.
+- **Incremental by month.** A second month was loaded with `--vars '{"month": "2023-02"}'` while January stayed untouched, and re-running a month twice gives identical totals. The Iceberg table uses `overwritePartitions()`, so a rerun replaces only its month: the tests check that it adds exactly one snapshot and no duplicate rows.
 - **Speed.** One month of Spark cleaning takes about 13 s. A full local Airflow run for a month (6 tasks, including retraining) takes about 23 s.
 
 ### Demand model
@@ -71,8 +87,9 @@ The XGBoost model uses only features known before trips happen (zone, hour, day 
 |---|---:|---:|---:|---:|
 | v1, January 2023 (original model) | 21.63 | 12.42 | 0.91 | 72.42 |
 | v2 local retrain, Jan + Feb 2023 | 21.72 | 12.73 | 0.91 | 72.49 |
+| v2 after the 12-month backfill (test: 23 Oct – 31 Dec) | 30.42 | 16.77 | 0.84 | 77.18 |
 
-A simple "same hour last week" baseline beats this model, because the pickup zone is encoded as a number. Treating zone as a category and adding lag features is the next step for the model. These findings come from my evaluation study and are not yet applied here.
+The full-year model is worse. Its test window is November and December, months it never saw in training, so the numeric `month` feature has nothing to go on, and the window includes the holidays. A simple "same hour last week" baseline also beats the January model, because the pickup zone is encoded as a number. Treating zone as a category, dropping `month` in favour of lag features, and using seasonal baselines (as the streaming project now does) are the next steps. These findings come from my evaluation study and are not yet applied to the model.
 
 ---
 
@@ -88,7 +105,7 @@ pip install -r requirements.txt
 make month MONTH=2023-01                      # download → clean → dbt build + tests
 make backfill MONTHS="2023-02 2023-03"        # more months, incrementally
 make train-local                              # retrain XGBoost on the local mart
-make test                                     # 23 tests
+make test                                     # 25 tests
 ```
 
 ### Run it with Airflow
@@ -141,6 +158,8 @@ The v1 table `nyc_taxi.trips_cleaned` and the `cleaned/` prefix are no longer us
 | One run = one month, partitioned `year=/month=` | Matches how TLC publishes data; reruns and backfills touch one partition only |
 | First-failing-rule tagging in one Spark pass | Per-rule counts come from a single `groupBy` instead of seven separate scans |
 | One canonical schema (`ingestion/schema.py`) | TLC changes column types between months; the Spark job and the Athena DDL both read this list, so they can't drift apart |
+| Apache Iceberg as the local lakehouse (`ingestion/lakehouse.py`) | Snapshots and atomic partition overwrites make reruns safe, and hidden `months()` partitioning means readers never handle partition columns. The streaming job MERGEs into the same catalog, and DuckDB/dbt read it with `iceberg_scan` |
+| File-based Iceberg catalog, not MinIO | MinIO's official images could no longer be pulled (Docker Hub and quay.io both refused them in Nov 2026), and the AWS path already uses real S3. A local-folder warehouse keeps the Iceberg behaviour without a storage server |
 | Quality gate in the cleaning job | Bad input should fail loudly before anything is loaded |
 | dbt on DuckDB *and* Athena | The same models run locally and in CI for free; the two functions that differ live in `macros/cross_db.sql` |
 | Incremental mart (`insert_overwrite` on Athena, `delete+insert` on DuckDB) | Monthly runs rebuild only their month |
@@ -155,7 +174,8 @@ The v1 table `nyc_taxi.trips_cleaned` and the `cleaned/` prefix are no longer us
 
 ## Status
 
-- **Verified locally:** the local path runs end to end and is covered by tests: Spark, the lake, dbt on DuckDB, the model, and the Airflow DAG run with `airflow dags test`.
+- **Verified locally:** the local path runs end to end and is covered by tests: Spark into Iceberg, dbt on DuckDB reading Iceberg, the model, and 12 months backfilled through the Airflow DAG.
+- **AWS still uses the Parquet export.** S3 and Athena run on the Parquet copy, not on Iceberg; an Athena Iceberg table is a next step.
 - **Verified on AWS (14 Nov 2026):**
   - January 2023 was uploaded to S3, registered in Athena as `trips_cleaned_v2`, and built with `dbt build --target athena --full-refresh` (21/21 passed).
   - February was then added incrementally with `make aws-load MONTH=2023-02`; again 21/21 passed, and January was left untouched.
@@ -168,7 +188,8 @@ The v1 table `nyc_taxi.trips_cleaned` and the `cleaned/` prefix are no longer us
 ```
 ingestion/
   download_tlc.py            download one month (skips if present, atomic write)
-  spark/clean_trips.py       PySpark: 7 rules, canonical schema, quality report + gate
+  spark/clean_trips.py       PySpark: 7 rules, canonical schema, Iceberg write, quality report + gate
+  lakehouse.py               Iceberg catalog `lake` (file-based) shared with the streaming job
   upload_to_s3.py            idempotent upload of one month's partition (--dry-run)
   athena_register.py         create partitioned Athena table + add the month (--dry-run)
   schema.py, common.py       shared schema and helpers
