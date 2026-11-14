@@ -2,18 +2,18 @@ version: 2
 
 sources:
   - name: nyc_taxi
-    description: "Cleaned trips written by ingestion/spark/clean_trips.py, partitioned by year/month."
+    description: "Cleaned trips written by ingestion/spark/clean_trips.py."
     schema: nyc_taxi
     tables:
       - name: trips_cleaned
         description: >
-          One row per trip that passed the 7 cleaning rules. On Athena this is the
-          table registered by ingestion/athena_register.py; locally DuckDB reads the
-          same Parquet files straight from data/lake/trips_cleaned/.
+          One row per trip that passed the 7 cleaning rules. Locally this is the Apache
+          Iceberg table lake.nyc.trips_cleaned, read by DuckDB with iceberg_scan; on
+          Athena it is the table registered by ingestion/athena_register.py.
         identifier: "{{ var('trips_table') }}"
         meta:
           # used by dbt-duckdb only (ignored on Athena)
-          external_location: "read_parquet('{{ env_var('LAKE_DIR', '../../data/lake/trips_cleaned') }}/*/*/*.parquet', hive_partitioning = true)"
+          external_location: "iceberg_scan('{{ env_var('ICEBERG_WAREHOUSE', '../../data/lake/iceberg') }}/nyc/trips_cleaned')"
         columns:
           - name: tpep_pickup_datetime
             data_tests: [not_null]

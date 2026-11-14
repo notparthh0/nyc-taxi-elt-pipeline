@@ -8,7 +8,9 @@ What it does
   2. Tags every row with the FIRST cleaning rule it fails, in a single pass
   3. Keeps rows that fail no rule, adds trip_duration_minutes and cost_per_mile,
      and casts everything to one canonical schema (ingestion/schema.py)
-  4. Overwrites only that month's partition: <out-dir>/year=YYYY/month=MM/
+  4. Replaces only that month in the Iceberg table lake.nyc.trips_cleaned
+     (dynamic partition overwrite) and in the Parquet export
+     <out-dir>/year=YYYY/month=MM/ used for the S3 upload and the stream replay
      -> re-running a month replaces it instead of duplicating rows (idempotent)
   5. Writes a data-quality report: <out-dir>/_reports/quality_<month>.json
   6. Exits with code 1 if the share of clean rows falls below --min-clean-ratio,
@@ -33,6 +35,7 @@ from pyspark.sql import DataFrame, SparkSession  # noqa: E402
 from pyspark.sql import functions as F  # noqa: E402
 
 from ingestion.common import DEFAULT_LAKE_DIR, DEFAULT_RAW_DIR, parse_month  # noqa: E402
+from ingestion.lakehouse import TRIPS_TABLE, create_trips_table_sql, with_iceberg  # noqa: E402
 from ingestion.schema import CLEANED_COLUMNS  # noqa: E402
 
 DEFAULT_OUT_DIR = DEFAULT_LAKE_DIR
@@ -82,20 +85,30 @@ def to_canonical(df: DataFrame) -> DataFrame:
     return df.select(*selected)
 
 
-def build_spark(app_name: str = "nyc-taxi-clean") -> SparkSession:
-    return (
+def build_spark(app_name: str = "nyc-taxi-clean", warehouse: Path = None) -> SparkSession:
+    builder = (
         SparkSession.builder.appName(app_name)
         .master("local[*]")
         # TLC files mix column types across months; the vectorised reader can choke on that
         .config("spark.sql.parquet.enableVectorizedReader", "false")
         # UTC has no daylight-saving jumps, so durations are identical on any machine
         .config("spark.sql.session.timeZone", "UTC")
-        .getOrCreate()
     )
+    return with_iceberg(builder, warehouse).getOrCreate()
+
+
+def write_iceberg(spark: SparkSession, partition_dir: Path, table: str) -> int:
+    """Replace this month in the Iceberg table; returns the new snapshot id.
+    overwritePartitions() only replaces partitions present in the incoming data,
+    and rule 7 guarantees every row belongs to the one month being loaded."""
+    spark.sql(f"CREATE NAMESPACE IF NOT EXISTS {table.rsplit('.', 1)[0]}")
+    spark.sql(create_trips_table_sql(table))
+    spark.read.parquet(str(partition_dir)).writeTo(table).overwritePartitions()
+    return spark.sql(f"SELECT snapshot_id FROM {table}.snapshots ORDER BY committed_at DESC LIMIT 1").first()[0]
 
 
 def run(spark: SparkSession, month: str, raw_dir: Path, out_dir: Path,
-        min_clean_ratio: float = 0.85, output_files: int = 1) -> dict:
+        min_clean_ratio: float = 0.85, output_files: int = 1, iceberg_table: str = TRIPS_TABLE) -> dict:
     """Clean one month. Returns the quality report (also written to disk)."""
     year, mm = parse_month(month)
     raw_path = Path(raw_dir) / f"yellow_tripdata_{month}.parquet"
@@ -114,12 +127,15 @@ def run(spark: SparkSession, month: str, raw_dir: Path, out_dir: Path,
     partition_dir = Path(out_dir) / f"year={year}" / f"month={mm}"
     clean = to_canonical(tagged.filter(F.col("_drop_reason").isNull()))
     clean.repartition(output_files).write.mode("overwrite").parquet(str(partition_dir))
+    snapshot_id = write_iceberg(spark, partition_dir, iceberg_table) if iceberg_table else None
 
     month_rule = "pickup outside the file's month"
     report = {
         "month": month,
         "raw_file": str(raw_path),
         "output_partition": str(partition_dir),
+        "iceberg_table": iceberg_table,
+        "iceberg_snapshot_id": snapshot_id,
         "raw_rows": raw_rows,
         "clean_rows": clean_rows,
         "removed_rows": raw_rows - clean_rows,
@@ -160,7 +176,8 @@ def main(argv=None) -> int:
           f"removed={report['removed_rows']:,} ({1 - report['clean_ratio']:.2%})")
     for rule, n in report["removed_by_rule_in_order"].items():
         print(f"    {n:>9,}  {rule}")
-    print(f"    written to {report['output_partition']}")
+    print(f"    written to {report['iceberg_table']} (snapshot {report['iceberg_snapshot_id']}) "
+          f"and {report['output_partition']}")
     if not report["passed_quality_gate"]:
         print(f"QUALITY GATE FAILED: clean ratio {report['clean_ratio']} < {report['min_clean_ratio']}",
               file=sys.stderr)
