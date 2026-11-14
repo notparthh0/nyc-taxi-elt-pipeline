@@ -91,6 +91,8 @@ def validate(month: str) -> dict:
     report = json.loads(report_path.read_text())
     if not report.get("passed_quality_gate"):
         raise ValueError(f"quality gate failed for {month}: {report}")
+    if not report.get("iceberg_snapshot_id"):
+        raise ValueError(f"no Iceberg snapshot recorded for {month}")
 
     metrics_path = Path(MODEL_DIR) / "evaluation_metrics.json"
     model_path = Path(MODEL_DIR) / "xgboost_demand_model.pkl"
@@ -110,6 +112,7 @@ def validate(month: str) -> dict:
             raise FileNotFoundError(f"no objects under s3://{os.environ['S3_BUCKET']}/{prefix}")
 
     summary = {"month": month, "clean_rows": report["clean_rows"], "clean_ratio": report["clean_ratio"],
+               "iceberg_snapshot_id": report["iceberg_snapshot_id"],
                "model_rmse": metrics.get("rmse"), "model_r2": metrics.get("r2"), "target": TARGET}
     print(json.dumps(summary, indent=2))
     return summary

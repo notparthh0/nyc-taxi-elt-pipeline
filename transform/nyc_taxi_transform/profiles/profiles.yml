@@ -1,5 +1,5 @@
 # Two targets for the same models:
-#   local  - DuckDB reading the local Parquet lake (no AWS needed; used by tests and CI)
+#   local  - DuckDB reading the local Iceberg lakehouse (no AWS needed; used by tests and CI)
 #   athena - AWS Athena over the S3 lake
 #
 #   dbt build --profiles-dir profiles --target local
@@ -14,6 +14,8 @@ nyc_taxi_transform:
       type: duckdb
       path: "{{ env_var('DUCKDB_PATH', '../../data/lake/warehouse.duckdb') }}"
       schema: nyc_taxi
+      extensions:
+        - iceberg          # reads the Iceberg table written by the PySpark job
       threads: 4
     athena:
       type: athena
